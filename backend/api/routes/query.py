@@ -1,9 +1,10 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-from qdrant_client.models import FieldCondition, Filter, MatchAny, QueryRequest as QdrantQueryRequest
+from qdrant_client.models import FieldCondition, Filter, MatchAny
 
+from api.response import api_error, api_success
 from config import settings
 from stores.embeddings import get_embedder
 from stores.llm import get_llm
@@ -15,27 +16,14 @@ logger = logging.getLogger(__name__)
 
 class QueryRequest(BaseModel):
     question: str
-    doc_ids: list[str] | None = None  # None = search across all documents
+    doc_ids: list[str] | None = None
     top_k: int = 8
 
 
-class Source(BaseModel):
-    filename: str
-    page_number: int
-    doc_id: str
-    score: float
-    excerpt: str
-
-
-class QueryResponse(BaseModel):
-    answer: str
-    sources: list[Source]
-
-
-@router.post("/query", response_model=QueryResponse)
+@router.post("/query")
 def query_documents(req: QueryRequest):
     if not req.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
+        api_error(message="Question cannot be empty", status_code=400)
 
     # ── 1. Embed question ──────────────────────────────────────────────────────
     embedder = get_embedder()
@@ -58,9 +46,9 @@ def query_documents(req: QueryRequest):
     ).points
 
     if not results:
-        return QueryResponse(
-            answer="No relevant content found in the indexed documents.",
-            sources=[],
+        return api_success(
+            data={"answer": "No relevant content found in the indexed documents.", "sources": []},
+            message="No relevant content found",
         )
 
     # ── 3. Build context for LLM ───────────────────────────────────────────────
@@ -71,15 +59,13 @@ def query_documents(req: QueryRequest):
         context_blocks.append(
             f"[{i}] File: {p['filename']}, Page: {p['page_number']}\n{p['text']}"
         )
-        sources.append(
-            Source(
-                filename=p["filename"],
-                page_number=p["page_number"],
-                doc_id=p["doc_id"],
-                score=round(hit.score, 4),
-                excerpt=p["text"][:300],
-            )
-        )
+        sources.append({
+            "filename": p["filename"],
+            "page_number": p["page_number"],
+            "doc_id": p["doc_id"],
+            "score": round(hit.score, 4),
+            "excerpt": p["text"][:300],
+        })
 
     context = "\n\n---\n\n".join(context_blocks)
 
@@ -96,4 +82,7 @@ def query_documents(req: QueryRequest):
     llm = get_llm()
     response = llm.complete(prompt)
 
-    return QueryResponse(answer=response.text, sources=sources)
+    return api_success(
+        data={"answer": response.text, "sources": sources},
+        message="Query answered successfully",
+    )

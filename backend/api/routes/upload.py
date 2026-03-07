@@ -1,9 +1,10 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
+from api.response import api_error, api_success
 from config import settings
 from stores.postgres import Document, Job, JobStatus, get_db
 from workers.tasks import process_document
@@ -21,33 +22,32 @@ async def upload_document(
 ):
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
+        api_error(
+            message=f"Unsupported file type '{suffix}'",
             status_code=400,
-            detail=f"Unsupported file type '{suffix}'. Allowed: {sorted(ALLOWED_EXTENSIONS)}",
+            error={"allowed": sorted(ALLOWED_EXTENSIONS), "received": suffix},
         )
 
     content = await file.read()
     if len(content) > MAX_BYTES:
-        raise HTTPException(
+        api_error(
+            message="File too large",
             status_code=413,
-            detail=f"File too large ({len(content) // 1024 // 1024}MB). Max: {settings.max_file_size_mb}MB",
+            error={"max_mb": settings.max_file_size_mb, "received_mb": len(content) // 1024 // 1024},
         )
 
     doc_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
 
-    # Save to host-mounted upload folder
     dest_dir = Path(settings.upload_dir) / doc_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     file_path = dest_dir / file.filename
     file_path.write_bytes(content)
 
-    # Persist records
     db.add(Document(id=doc_id, filename=file.filename, file_path=str(file_path)))
     db.add(Job(id=job_id, doc_id=doc_id, filename=file.filename, status=JobStatus.pending))
     db.commit()
 
-    # Queue async processing
     process_document.delay(
         job_id=job_id,
         doc_id=doc_id,
@@ -55,9 +55,8 @@ async def upload_document(
         filename=file.filename,
     )
 
-    return {
-        "job_id": job_id,
-        "doc_id": doc_id,
-        "filename": file.filename,
-        "status": "queued",
-    }
+    return api_success(
+        data={"job_id": job_id, "doc_id": doc_id, "filename": file.filename},
+        message="File uploaded and queued for processing",
+        status_code=202,
+    )
