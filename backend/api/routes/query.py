@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from qdrant_client.models import FieldCondition, Filter, MatchAny
+from qdrant_client.models import FieldCondition, Filter, MatchAny, QueryRequest as QdrantQueryRequest
 
 from config import settings
 from stores.embeddings import get_embedder
@@ -49,13 +49,13 @@ def query_documents(req: QueryRequest):
             must=[FieldCondition(key="doc_id", match=MatchAny(any=req.doc_ids))]
         )
 
-    results = client.search(
+    results = client.query_points(
         collection_name=settings.qdrant_collection,
-        query_vector=question_vec,
+        query=question_vec,
         limit=req.top_k,
         query_filter=search_filter,
         with_payload=True,
-    )
+    ).points
 
     if not results:
         return QueryResponse(

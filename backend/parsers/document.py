@@ -37,7 +37,7 @@ def _parse_pdf(path: Path) -> list[dict]:
             continue
         pages.append({
             "text": text,
-            "page_number": page["metadata"]["page"] + 1,  # 0-indexed → 1-indexed
+            "page_number": page["metadata"]["page"],  # already 1-indexed in pymupdf4llm 0.3+
             "metadata": {"source": path.name, "type": "pdf"},
         })
     return pages

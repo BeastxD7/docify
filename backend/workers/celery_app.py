@@ -17,4 +17,6 @@ celery_app.conf.update(
     enable_utc=True,
     task_acks_late=True,          # ack only after task completes (safe retries)
     worker_prefetch_multiplier=1, # one task per worker at a time (fair for long jobs)
+    # Use 'solo' pool on Windows — prefork uses os.fork() which is not supported on Windows
+    worker_pool="solo",
 )
