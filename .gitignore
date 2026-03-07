@@ -1,0 +1,35 @@
+# Environment
+.env
+backend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+backend/.venv/
+*.egg-info/
+dist/
+build/
+
+# uv
+backend/uv.lock
+
+# Uploads (raw files — not committed)
+uploads/*
+!uploads/.gitkeep
+
+# Node / Bun
+node_modules/
+frontend/node_modules/
+bun.lockb
+.next/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
