@@ -269,11 +269,15 @@ accessible on your machine without going through Docker.
 - [x] Hybrid query: vector search + graph context (entities + community summaries)
 - [x] Graph API: /graph/{doc_id}/entities|relations|communities|subgraph
 
-### Phase 3 — Visualization
-- [ ] Cytoscape.js graph view
-- [ ] Filter by node type, community, document
-- [ ] Click node → source passages
-- [ ] Timeline view for temporal entities
+### Phase 3 — Visualization ✅ DONE
+- [x] Cytoscape.js graph view (/graph page, force-directed layout)
+- [x] Nodes colored by entity type, community borders distinguish clusters
+- [x] Filter by entity type (toggle on/off, counts shown)
+- [x] Click node → highlight neighborhood + entity detail side panel
+- [x] Communities list with LLM summaries in side panel
+- [x] Documents page: graph_status badge + "View Graph" button
+- [x] Deep-link from documents: /graph?doc=<id>
+- [ ] Timeline view for temporal entities (deferred to Phase 4)
 
 ### Phase 4 — Scale & Polish
 - [ ] Celery workers for batch processing (10,000 PDFs)
