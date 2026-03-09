@@ -7,6 +7,7 @@ from chunkers.hierarchical import chunk_pages
 from config import settings
 from extractors.community import detect_and_store_communities
 from extractors.graph_extractor import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES, extract_from_chunks
+from extractors.schema_detector import detect_schema
 from parsers.document import parse_document
 from stores.embeddings import get_embedder
 from stores.postgres import Document, GraphStatus, Job, JobStatus, SessionLocal
@@ -85,7 +86,21 @@ def process_document(
         db.commit()
         logger.info(f"[{job_id}] Done — {len(chunks)} chunks stored")
 
-        # ── 5. Kick off graph extraction ───────────────────────────────────────
+        # ── 5. Auto-detect schema (unless caller provided explicit types) ─────────
+        if not entity_types or not relation_types:
+            logger.info(f"[{job_id}] Auto-detecting schema from document content…")
+            detected = detect_schema(chunks)
+            entity_types = entity_types or detected["entity_types"]
+            relation_types = relation_types or detected["relation_types"]
+
+        # Persist detected schema on the Document record
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc:
+            doc.entity_types = entity_types
+            doc.relation_types = relation_types
+            db.commit()
+
+        # ── 6. Kick off graph extraction ───────────────────────────────────────
         extract_graph.delay(
             doc_id=doc_id,
             chunks=chunks,

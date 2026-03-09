@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Enum, String, Text, create_engine, text
+from sqlalchemy import JSON, Column, DateTime, Enum, String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from config import settings
@@ -53,6 +53,8 @@ class Document(Base):
     total_chunks = Column(String, nullable=True)
     graph_status = Column(Enum(GraphStatus), nullable=True)
     graph_error = Column(Text, nullable=True)
+    entity_types = Column(JSON, nullable=True)   # auto-detected schema
+    relation_types = Column(JSON, nullable=True) # auto-detected schema
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -63,8 +65,10 @@ def init_db():
         conn.execute(
             text(
                 "ALTER TABLE documents "
-                "ADD COLUMN IF NOT EXISTS graph_status VARCHAR DEFAULT NULL, "
-                "ADD COLUMN IF NOT EXISTS graph_error  TEXT DEFAULT NULL"
+                "ADD COLUMN IF NOT EXISTS graph_status  VARCHAR DEFAULT NULL, "
+                "ADD COLUMN IF NOT EXISTS graph_error   TEXT    DEFAULT NULL, "
+                "ADD COLUMN IF NOT EXISTS entity_types  JSONB   DEFAULT NULL, "
+                "ADD COLUMN IF NOT EXISTS relation_types JSONB  DEFAULT NULL"
             )
         )
         conn.commit()

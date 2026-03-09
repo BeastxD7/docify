@@ -37,6 +37,8 @@ def list_documents(db: Session = Depends(get_db)):
                 "filename": d.filename,
                 "total_chunks": d.total_chunks,
                 "graph_status": d.graph_status,
+                "entity_types": d.entity_types,
+                "relation_types": d.relation_types,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
             for d in docs

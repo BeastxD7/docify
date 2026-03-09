@@ -6,9 +6,9 @@ from qdrant_client.models import FieldCondition, Filter, MatchAny
 
 from api.response import api_error, api_success
 from config import settings
+from stores.cypher_generator import graph_context_for_question
 from stores.embeddings import get_embedder
 from stores.llm import get_llm
-from stores.neo4j_store import get_neo4j_driver
 from stores.qdrant_store import get_qdrant_client
 
 router = APIRouter()
@@ -23,37 +23,27 @@ class QueryRequest(BaseModel):
 
 
 def _fetch_graph_context(question: str, doc_ids: list[str] | None) -> str:
-    """Pull relevant community summaries and entity descriptions from Neo4j."""
-    driver = get_neo4j_driver()
+    """
+    For each requested doc, use an LLM to generate a Cypher query tailored to
+    the question, execute it, and combine results with top community summaries.
+    """
+    from stores.neo4j_store import get_neo4j_driver
+
     context_parts = []
+    target_docs = doc_ids or []
+
+    # ── LLM-generated Cypher per doc ───────────────────────────────────────────
+    for doc_id in target_docs[:3]:  # cap at 3 docs to keep prompt size sane
+        result = graph_context_for_question(question, doc_id)
+        if result:
+            context_parts.append(result)
+
+    # ── Community summaries (bird's-eye view) ──────────────────────────────────
     try:
+        driver = get_neo4j_driver()
         with driver.session() as session:
-            doc_filter = "AND e.doc_id IN $doc_ids" if doc_ids else ""
-            # Find entities whose names appear in the question (simple keyword match)
-            words = [w.strip(".,!?") for w in question.split() if len(w) > 3]
-            if words:
-                entity_records = session.run(
-                    f"""
-                    MATCH (e:Entity)
-                    WHERE any(word IN $words WHERE toLower(e.name) CONTAINS toLower(word))
-                    {doc_filter}
-                    RETURN e.name AS name, e.entity_type AS type, e.description AS description
-                    LIMIT 10
-                    """,
-                    words=words,
-                    doc_ids=doc_ids or [],
-                ).data()
-
-                if entity_records:
-                    entity_lines = [
-                        f"- {r['name']} ({r['type']}): {r['description']}"
-                        for r in entity_records
-                    ]
-                    context_parts.append("Relevant entities:\n" + "\n".join(entity_lines))
-
-            # Fetch community summaries for matched docs
-            comm_filter = "WHERE c.doc_id IN $doc_ids" if doc_ids else ""
-            community_records = session.run(
+            comm_filter = "WHERE c.doc_id IN $doc_ids" if target_docs else ""
+            records = session.run(
                 f"""
                 MATCH (c:Community)
                 {comm_filter}
@@ -61,18 +51,18 @@ def _fetch_graph_context(question: str, doc_ids: list[str] | None) -> str:
                 ORDER BY c.size DESC
                 LIMIT 3
                 """,
-                doc_ids=doc_ids or [],
+                doc_ids=target_docs,
             ).data()
-
-            if community_records:
-                summaries = [r["summary"] for r in community_records if r["summary"]]
-                if summaries:
-                    context_parts.append("Document overview (communities):\n" + "\n".join(f"- {s}" for s in summaries))
-
-    except Exception as exc:
-        logger.warning(f"Graph context fetch failed: {exc}")
-    finally:
         driver.close()
+
+        summaries = [r["summary"] for r in records if r.get("summary")]
+        if summaries:
+            context_parts.append(
+                "Document overview (topic clusters):\n"
+                + "\n".join(f"- {s}" for s in summaries)
+            )
+    except Exception as exc:
+        logger.warning(f"Community fetch failed: {exc}")
 
     return "\n\n".join(context_parts)
 
