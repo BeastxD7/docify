@@ -27,6 +27,9 @@ dependencies = [
     # Vector DB
     "qdrant-client>=1.12.0",
 
+    # Graph DB
+    "neo4j>=5.0.0",
+
     # LLM
     "anthropic>=0.40.0",
 

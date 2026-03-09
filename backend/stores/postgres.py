@@ -37,6 +37,13 @@ class Job(Base):
     )
 
 
+class GraphStatus(str, enum.Enum):
+    pending = "pending"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -44,6 +51,8 @@ class Document(Base):
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     total_chunks = Column(String, nullable=True)
+    graph_status = Column(Enum(GraphStatus), nullable=True)
+    graph_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

@@ -5,7 +5,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import query, status, upload
+from api.routes import graph, query, status, upload
+from stores.neo4j_store import init_neo4j
 from stores.postgres import init_db
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    try:
+        init_neo4j()
+    except Exception as exc:
+        logger.warning(f"Neo4j init skipped: {exc}")
     yield
 
 
@@ -34,6 +39,7 @@ app.add_middleware(
 app.include_router(upload.router, tags=["upload"])
 app.include_router(status.router, tags=["status"])
 app.include_router(query.router, tags=["query"])
+app.include_router(graph.router, tags=["graph"])
 
 
 @app.exception_handler(HTTPException)
