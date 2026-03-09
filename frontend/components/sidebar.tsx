@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Upload, MessageSquare, FileText } from "lucide-react";
+import { Upload, MessageSquare, FileText, Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const nav = [
-  { href: "/chat",     label: "Chat",      icon: MessageSquare },
-  { href: "/upload",   label: "Upload",    icon: Upload },
-  { href: "/documents",label: "Documents", icon: FileText },
+  { href: "/chat",      label: "Chat",      icon: MessageSquare },
+  { href: "/upload",    label: "Upload",    icon: Upload },
+  { href: "/documents", label: "Documents", icon: FileText },
+  { href: "/graph",     label: "Graph",     icon: Share2 },
 ];
 
 export function Sidebar() {

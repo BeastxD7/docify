@@ -22,7 +22,29 @@ export interface Document {
   id: string;
   filename: string;
   total_chunks: string | null;
+  graph_status: "pending" | "processing" | "completed" | "failed" | null;
   created_at: string;
+}
+
+export interface GraphEntity {
+  name: string;
+  type: string;
+  description: string | null;
+  page_number: number | null;
+}
+
+export interface GraphRelation {
+  source: string;
+  target: string;
+  type: string;
+  chunk_index: number | null;
+}
+
+export interface GraphCommunity {
+  community_id: number;
+  summary: string;
+  members: string[];
+  size: number;
 }
 
 export interface JobStatus {
@@ -70,4 +92,39 @@ export function queryDocuments(question: string, docIds: string[] | null = null,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, doc_ids: docIds, top_k: topK }),
   });
+}
+
+export function getEntities(docId: string, entityType?: string, limit = 500) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (entityType) params.set("entity_type", entityType);
+  return request<{ doc_id: string; entities: GraphEntity[]; count: number }>(
+    `/graph/${docId}/entities?${params}`,
+  );
+}
+
+export function getRelations(docId: string, limit = 1000) {
+  return request<{ doc_id: string; relations: GraphRelation[]; count: number }>(
+    `/graph/${docId}/relations?limit=${limit}`,
+  );
+}
+
+export function getCommunities(docId: string) {
+  return request<{ doc_id: string; communities: GraphCommunity[]; count: number }>(
+    `/graph/${docId}/communities`,
+  );
+}
+
+export function getSchemaDefaults() {
+  return request<{ entity_types: string[]; relation_types: string[] }>("/graph/schema/defaults");
+}
+
+export function triggerExtract(docId: string, entityTypes?: string[], relationTypes?: string[]) {
+  return request<{ doc_id: string; chunks_queued: number; entity_types: string[]; relation_types: string[] }>(
+    `/graph/${docId}/extract`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity_types: entityTypes ?? null, relation_types: relationTypes ?? null }),
+    },
+  );
 }
