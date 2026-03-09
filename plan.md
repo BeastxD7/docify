@@ -258,13 +258,16 @@ accessible on your machine without going through Docker.
 - [x] docker-compose.infra.yml — infra-only compose for local dev
 - [ ] Simple React UI: upload + chat  ← next up before Phase 2
 
-### Phase 2 — GraphRAG
-- [ ] Schema definition UI (user defines entity/relation types)
-- [ ] Entity + relation extraction (LlamaIndex SchemaLLMPathExtractor)
-- [ ] Neo4j storage
-- [ ] Community detection (Leiden algorithm)
-- [ ] Community summaries
-- [ ] Hybrid query: vector + graph traversal
+### Phase 2 — GraphRAG ✅ DONE
+- [x] Schema defaults API — GET /graph/schema/defaults
+- [x] Custom schema at upload — entity_types/relation_types form fields
+- [x] Re-trigger extraction — POST /graph/{doc_id}/extract (fetches chunks from Qdrant)
+- [x] Entity + relation extraction (LLM schema-guided, extractors/graph_extractor.py)
+- [x] Neo4j storage + indexes (stores/neo4j_store.py)
+- [x] Community detection (Louvain via networkx, extractors/community.py)
+- [x] Community summaries (LLM-generated per cluster)
+- [x] Hybrid query: vector search + graph context (entities + community summaries)
+- [x] Graph API: /graph/{doc_id}/entities|relations|communities|subgraph
 
 ### Phase 3 — Visualization
 - [ ] Cytoscape.js graph view
