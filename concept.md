@@ -16,6 +16,7 @@
    - [Step 3 — Chunk](#step-3--chunk)
    - [Step 4 — Embed](#step-4--embed)
    - [Step 5 — Store in Vector DB (Qdrant)](#step-5--store-in-vector-db-qdrant)
+   - [Step 5.5 — Auto Schema Detection](#step-55--auto-schema-detection)
    - [Step 6 — Entity & Relation Extraction](#step-6--entity--relation-extraction)
    - [Step 7 — Store in Graph DB (Neo4j)](#step-7--store-in-graph-db-neo4j)
    - [Step 8 — Community Detection](#step-8--community-detection)
@@ -164,8 +165,12 @@ PDF / DOCX / TXT
   [5] STORE VECTORS ───── write chunks + vectors to Qdrant
       │
       ▼
-  [6] EXTRACT ENTITIES ── LLM reads each chunk, finds PERSON/LOCATION/EVENT etc.
+  [5.5] AUTO SCHEMA ───── sample 15 chunks → LLM detects domain-specific entity/
+      │                   relation types → stored in PostgreSQL documents table
       │
+      ▼
+  [6] EXTRACT ENTITIES ── LLM reads each chunk using the detected schema,
+      │                   finds domain-specific entities + relations
       ▼
   [7] STORE GRAPH ──────── write Entity nodes + RELATION edges to Neo4j
       │
@@ -396,36 +401,92 @@ Result: searching 10M vectors takes ~5ms.
 
 ---
 
+### Step 5.5 — Auto Schema Detection
+
+**File:** `backend/extractors/schema_detector.py`
+
+**The problem with a fixed schema:**
+
+If every document uses the same types — `PERSON, ORGANIZATION, LOCATION, EVENT, CONCEPT` — the graph becomes generic and misses what actually matters for that specific document.
+
+| Document | What you actually want |
+|---|---|
+| Kids' story book | `CHARACTER, ANIMAL, MAGICAL_OBJECT, PLACE` → `FRIENDS_WITH, DEFEATS, LIVES_IN, OWNS` |
+| Game of Thrones | `CHARACTER, HOUSE, LOCATION, BATTLE, TITLE` → `MEMBER_OF, RULES, KILLED, ALLIED_WITH, MARRIED_TO` |
+| Legal contract | `PARTY, CLAUSE, JURISDICTION, OBLIGATION` → `BOUND_BY, GOVERNS, REFERS_TO, OVERRIDES` |
+| Scientific paper | `AUTHOR, CONCEPT, EXPERIMENT, FINDING` → `CONDUCTED_BY, PROVES, CONTRADICTS, CITES` |
+
+**The fix — ask the LLM to design the schema:**
+
+Instead of hardcoding types, we sample the first 15 chunks (~6000 tokens) and ask the LLM:
+
+```
+You are analyzing a document to design a knowledge graph schema for it.
+
+Read the text samples below and suggest entity types and relationship types
+that best capture THIS specific document's domain and content.
+
+Examples of domain-specific schemas:
+- Kids story book → CHARACTER, ANIMAL, MAGICAL_OBJECT | FRIENDS_WITH, DEFEATS, LIVES_IN
+- Game of Thrones → CHARACTER, HOUSE, LOCATION, BATTLE | MEMBER_OF, KILLED, ALLIED_WITH
+- Legal document  → PARTY, CLAUSE, JURISDICTION | BOUND_BY, GOVERNS, REFERS_TO
+
+Rules:
+- Suggest 5-8 entity types (UPPERCASE, specific to this document's domain)
+- Suggest 5-8 relationship types (UPPERCASE, verb-based)
+- Return ONLY valid JSON
+
+Text samples from the document:
+<first 15 chunks here, 400 chars each>
+
+JSON:
+```
+
+The LLM returns something like:
+```json
+{
+  "entity_types": ["CHARACTER", "KINGDOM", "MAGICAL_ARTIFACT", "QUEST", "CREATURE"],
+  "relation_types": ["ALLIED_WITH", "SEEKS", "GUARDS", "BETRAYS", "RULES_OVER"]
+}
+```
+
+**This schema is then:**
+1. Stored in the `documents` table (`entity_types` and `relation_types` JSONB columns)
+2. Passed to the extraction step so the LLM knows exactly what to look for
+3. Falls back to generic defaults if detection fails
+
+**The result:** Two different documents get completely different, meaningful graphs — not a generic soup of PERSONs and LOCATIONs.
+
+---
+
 ### Step 6 — Entity & Relation Extraction
 
 **File:** `backend/extractors/graph_extractor.py`
 
-This is the GraphRAG-specific step. We read each chunk and ask the LLM: *"What people, places, events, and organizations are mentioned here, and how are they related?"*
-
-**The extraction prompt:**
+With the schema now tailored to the document, every chunk is processed by the LLM:
 
 ```
 Extract entities and relationships from the text below.
 
-Entity types to find: PERSON, ORGANIZATION, LOCATION, EVENT, CONCEPT, PRODUCT, TECHNOLOGY
-Relationship types to find: RELATED_TO, WORKS_FOR, LOCATED_IN, PART_OF, CREATED_BY, CAUSED_BY, PARTICIPATED_IN
+Entity types to find: CHARACTER, KINGDOM, MAGICAL_ARTIFACT, QUEST, CREATURE
+Relationship types to find: ALLIED_WITH, SEEKS, GUARDS, BETRAYS, RULES_OVER
 
 Return ONLY valid JSON:
 {
   "entities": [
-    {"name": "Neil Armstrong", "type": "PERSON", "description": "American astronaut, first human on the Moon"}
+    {"name": "Frodo", "type": "CHARACTER", "description": "A hobbit tasked with destroying the One Ring"}
   ],
   "relations": [
-    {"source": "Neil Armstrong", "type": "PARTICIPATED_IN", "target": "Apollo 11"}
+    {"source": "Frodo", "type": "SEEKS", "target": "Mount Doom"}
   ]
 }
 
-Text: <chunk text goes here>
+Text: <chunk text here>
 ```
 
 **Why schema-guided extraction?**
 
-Without a schema, the LLM might return random entity types like "ACHIEVEMENT", "CONCEPT", "IDEA", "TOPIC" — inconsistent across chunks. With a fixed schema, all chunks use the same vocabulary, making it possible to merge entities across the document.
+Without a schema the LLM invents inconsistent types across chunks: one chunk returns `HERO`, another `PROTAGONIST`, another `PERSON` for the same concept. With a fixed schema all chunks use identical vocabulary, making entity deduplication and graph merging possible.
 
 **Deduplication:**
 
@@ -437,20 +498,20 @@ for ent in data.get("entities", []):
         all_entities[name] = {...}
 ```
 
-If "Neil Armstrong" appears in 50 chunks, only one Entity node is created. The description from the first occurrence is kept.
+If "Frodo" appears across 80 chunks, only one Entity node is created.
 
-**Validation:**
+**Validation — drop hallucinated types:**
 
 ```python
-valid_etypes = {t.upper() for t in entity_types}  # {"PERSON", "ORGANIZATION", ...}
+valid_etypes = {t.upper() for t in entity_types}  # {"CHARACTER", "KINGDOM", ...}
 
 for ent in data.get("entities", []):
     etype = ent.get("type", "").strip().upper()
     if etype not in valid_etypes:
-        continue  # discard hallucinated types
+        continue  # silently discard types not in schema
 ```
 
-The LLM sometimes invents entity types not in the schema. We silently drop those.
+The LLM occasionally invents types not in the schema (e.g. `WIZARD` when schema only has `CHARACTER`). We discard those.
 
 ---
 
@@ -623,16 +684,19 @@ User types: "Who participated in Apollo 11 and what was their role?"
                               │
               ┌───────────────▼───────────────┐
               │   3. Graph Context (Neo4j)     │
-              │   Keywords from question:      │
-              │   ["participated", "Apollo",   │
-              │    "11", "role"]               │
+              │   Text-to-Cypher:              │
+              │   LLM reads the graph schema   │
+              │   (what entity/relation types  │
+              │   exist in this doc) and writes │
+              │   a tailored Cypher query.     │
               │                               │
-              │   Entity match:               │
-              │   - Apollo 11 (EVENT): ...    │
-              │   - Neil Armstrong (PERSON):..│
+              │   Generated Cypher:           │
+              │   MATCH (a:Entity)-[:PARTICIP  │
+              │   ATED_IN]->(e:Entity {name:  │
+              │   "Apollo 11",...})            │
+              │   RETURN a.name, a.entity_type │
               │                               │
-              │   Top community summaries:    │
-              │   - "The Apollo 11 crew..."   │
+              │   + Top community summaries   │
               └───────────────┬───────────────┘
                               │
               ┌───────────────▼───────────────┐
@@ -676,31 +740,87 @@ results = client.query_points(
 ).points
 ```
 
-**The graph context (step 3) in code:**
+**The graph context (step 3) — Text-to-Cypher:**
+
+**File:** `backend/stores/cypher_generator.py`
+
+Instead of splitting the question into keywords and doing a `CONTAINS` match (which would miss *"Who did Ned Stark's killer serve?"* unless those exact names appear), we use the LLM to write a real Cypher query.
+
+**Step 1 — fetch the actual graph schema from Neo4j:**
 
 ```python
-# Extract words longer than 3 characters from the question
-words = [w.strip(".,!?") for w in question.split() if len(w) > 3]
-# ["participated", "Apollo", "role"]
+# What entity types exist in this doc?
+session.run(
+    "MATCH (e:Entity {doc_id: $doc_id}) RETURN DISTINCT e.entity_type AS type",
+    doc_id=doc_id,
+)
+# → ["CHARACTER", "HOUSE", "LOCATION", "BATTLE"]
 
-# Find entities whose names contain any of these words
-session.run("""
-    MATCH (e:Entity)
-    WHERE any(word IN $words WHERE toLower(e.name) CONTAINS toLower(word))
-    RETURN e.name, e.entity_type, e.description
-    LIMIT 10
-""", words=words)
+# What relationship types exist?
+session.run(
+    "MATCH (s:Entity {doc_id:$doc_id})-[r]->(t:Entity {doc_id:$doc_id}) "
+    "RETURN DISTINCT r.relation_type AS type",
+    doc_id=doc_id,
+)
+# → ["KILLED", "MEMBER_OF", "RULES", "ALLIED_WITH"]
+```
 
-# Also fetch top 3 community summaries for the doc
+**Step 2 — ask the LLM to write a Cypher query:**
+
+```
+You are a Neo4j Cypher expert. Write a Cypher query to answer the user's question.
+
+Graph schema (doc_id = "abc-123"):
+  Entity types present: CHARACTER, HOUSE, LOCATION, BATTLE
+  Relationship types present: KILLED, MEMBER_OF, RULES, ALLIED_WITH
+
+Rules:
+- Always filter with {doc_id: $doc_id}
+- Use MATCH and RETURN only — no CREATE, MERGE, DELETE
+- LIMIT 15
+
+Question: "Who killed Ned Stark and which house do they belong to?"
+
+Return ONLY the Cypher query:
+```
+
+The LLM returns something like:
+```cypher
+MATCH (killer:Entity {doc_id: $doc_id})-[:KILLED]->(ned:Entity {name: "Ned Stark", doc_id: $doc_id})
+MATCH (killer)-[:MEMBER_OF]->(house:Entity {doc_id: $doc_id})
+RETURN killer.name AS killer, house.name AS house
+LIMIT 15
+```
+
+**Step 3 — safety check then execute:**
+
+```python
+_WRITE_KEYWORDS = re.compile(r"\b(CREATE|MERGE|DELETE|REMOVE|SET|DROP)\b", re.IGNORECASE)
+
+if _WRITE_KEYWORDS.search(cypher):
+    return ""  # block any write operations
+
+records = session.run(cypher, doc_id=doc_id).data()
+# → [{"killer": "Ilyn Payne", "house": "House Lannister"}]
+```
+
+**Step 4 — community summaries still appended:**
+
+```python
+# Bird's-eye view of the document's main topics
 session.run("""
     MATCH (c:Community {doc_id: $doc_id})
     RETURN c.summary ORDER BY c.size DESC LIMIT 3
 """)
 ```
 
-**Why keyword matching for graph lookup?**
+**Why this is far better than keyword matching:**
 
-We *could* embed entity names and do vector search on them, but that adds complexity. Simple keyword matching works well because entity names are specific proper nouns — "Apollo 11", "Neil Armstrong" — that appear verbatim in questions.
+| | Old approach | New approach |
+|---|---|---|
+| Question: "Who killed Ned Stark?" | Splits to ["killed", "Stark"] → finds entity named "Stark" → returns Ned Stark's description | Generates `MATCH (a)-[:KILLED]->(b {name:"Ned Stark"})` → returns the actual killer |
+| Question: "Which houses are allied with the Starks?" | Returns entities containing "houses" or "Starks" | Generates `MATCH (h)-[:ALLIED_WITH]->(s {name:"House Stark"})` → returns all allied houses |
+| Question: "What quest does Frodo go on?" | Returns entities containing "Frodo" | Generates `MATCH (f {name:"Frodo"})-[:SEEKS]->(q:Entity)` → returns the actual quest |
 
 ---
 
@@ -811,22 +931,31 @@ Returns all nodes and edges within 2 hops of "Neil Armstrong" — useful for the
 There are 3 places where an LLM is called:
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                     LLM Usage Map                                │
-├───────────────┬─────────────────────────────┬───────────────────┤
-│   Operation   │         When                │   Default Model   │
-├───────────────┼─────────────────────────────┼───────────────────┤
-│ Entity        │ After chunking/embedding,   │ OpenRouter:       │
-│ Extraction    │ once per chunk              │ llama-3.3-70b     │
-│               │ (background Celery task)    │ -instruct:free    │
-├───────────────┼─────────────────────────────┼───────────────────┤
-│ Community     │ After community detection,  │ OpenRouter:       │
-│ Summarization │ once per community cluster  │ llama-3.1-8b      │
-│               │ (background Celery task)    │ -instruct:free    │
-├───────────────┼─────────────────────────────┼───────────────────┤
-│ Q&A Synthesis │ On every user query         │ Ollama:           │
-│               │ (synchronous, ~2-5s)        │ llama3.2:3b       │
-└───────────────┴─────────────────────────────┴───────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           LLM Usage Map                                      │
+├────────────────────┬──────────────────────────────┬──────────────────────────┤
+│   Operation        │   When                       │   Default Model          │
+├────────────────────┼──────────────────────────────┼──────────────────────────┤
+│ Schema Detection   │ After chunking, once per doc │ OpenRouter:              │
+│                    │ (samples 15 chunks, infers   │ llama-3.3-70b            │
+│                    │ entity/relation types)        │ -instruct:free           │
+│                    │ (background Celery task)      │                          │
+├────────────────────┼──────────────────────────────┼──────────────────────────┤
+│ Entity Extraction  │ Once per chunk               │ OpenRouter:              │
+│                    │ (background Celery task)      │ llama-3.3-70b            │
+│                    │                              │ -instruct:free           │
+├────────────────────┼──────────────────────────────┼──────────────────────────┤
+│ Community          │ After community detection,   │ OpenRouter:              │
+│ Summarization      │ once per cluster             │ llama-3.1-8b             │
+│                    │ (background Celery task)      │ -instruct:free           │
+├────────────────────┼──────────────────────────────┼──────────────────────────┤
+│ Cypher Generation  │ On every user query,         │ OpenRouter:              │
+│ (Text-to-Cypher)   │ once per document searched   │ llama-3.3-70b            │
+│                    │ (synchronous, ~1-2s)          │ -instruct:free           │
+├────────────────────┼──────────────────────────────┼──────────────────────────┤
+│ Q&A Synthesis      │ On every user query          │ Ollama:                  │
+│                    │ (synchronous, ~2-5s)          │ llama3.2:3b              │
+└────────────────────┴──────────────────────────────┴──────────────────────────┘
 ```
 
 ### Why different models per task?
@@ -878,8 +1007,11 @@ POST /upload                       picks up task from Redis
   → create DB record               → chunk
   → push task to Redis   ─────►    → embed
   → return 202                     → store in Qdrant
+                                   → AUTO SCHEMA DETECTION
+                                       (sample 15 chunks → LLM infers types
+                                        → store in documents table)
                                    → trigger extract_graph task
-                                       → extract entities
+                                       → extract entities (using detected schema)
                                        → store in Neo4j
                                        → detect communities
                                        → summarize communities
@@ -913,10 +1045,13 @@ abc-123   | def-456| file.pdf | completed | NULL  | 2026-01-01 | 2026-01-01
 
 **`documents`** — registry of all indexed documents:
 ```
-id (UUID) | filename | file_path | total_chunks | graph_status | graph_error
-────────────────────────────────────────────────────────────────────────────
-def-456   | file.pdf | /data/... | 342          | completed    | NULL
+id (UUID) | filename | total_chunks | graph_status | entity_types (JSONB)         | relation_types (JSONB)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+def-456   | got.pdf  | 1842         | completed    | ["CHARACTER","HOUSE","BATTLE"]| ["KILLED","RULES",...]
+abc-123   | kids.pdf | 312          | completed    | ["CHARACTER","ANIMAL","PLACE"]| ["FRIENDS_WITH","OWNS"]
 ```
+
+`entity_types` and `relation_types` are the schema the LLM auto-detected for that document — stored as JSONB arrays. They are also used when re-triggering extraction (`POST /graph/{doc_id}/extract`) to preserve the original schema.
 
 `graph_status` tracks the Phase 2 pipeline separately from the main job — chunking/embedding can succeed while graph extraction is still running.
 
@@ -998,4 +1133,4 @@ Embedding:
 
 ---
 
-*This document reflects the implementation as of Phase 3 completion (backend + frontend + graph visualization). Phase 4 (scale, re-ranker, WebSocket progress, entity deduplication) is planned next.*
+*This document reflects the current implementation: Phase 1 (core pipeline), Phase 2 (GraphRAG with dynamic auto schema detection + Text-to-Cypher graph queries), Phase 3 (Cytoscape.js visualization), plus multi-provider LLM support (Anthropic, Groq, OpenRouter, Ollama). Phase 4 (scale, re-ranker, WebSocket progress, entity deduplication) is planned next.*
