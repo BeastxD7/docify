@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Enum, String, Text, create_engine
+from sqlalchemy import Column, DateTime, Enum, String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from config import settings
@@ -58,6 +58,16 @@ class Document(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Idempotent column migrations for existing tables
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE documents "
+                "ADD COLUMN IF NOT EXISTS graph_status VARCHAR DEFAULT NULL, "
+                "ADD COLUMN IF NOT EXISTS graph_error  TEXT DEFAULT NULL"
+            )
+        )
+        conn.commit()
 
 
 def get_db():
