@@ -1,12 +1,19 @@
 import logging
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from api.response import api_error, api_success
+from extractors.graph_extractor import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES
 from stores.neo4j_store import get_neo4j_driver
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class ExtractRequest(BaseModel):
+    entity_types: list[str] | None = None
+    relation_types: list[str] | None = None
 
 
 @router.get("/graph/{doc_id}/entities")
@@ -143,4 +150,81 @@ def get_subgraph(doc_id: str, entity: str, depth: int = 2):
             "edges": edges,
         },
         message=f"Subgraph around '{entity}': {len(nodes)} nodes, {len(edges)} edges",
+    )
+
+
+@router.get("/graph/schema/defaults")
+def get_schema_defaults():
+    """Return the default entity and relation type lists."""
+    return api_success(
+        data={
+            "entity_types": DEFAULT_ENTITY_TYPES,
+            "relation_types": DEFAULT_RELATION_TYPES,
+        },
+        message="Default schema",
+    )
+
+
+@router.post("/graph/{doc_id}/extract")
+def trigger_extract(doc_id: str, req: ExtractRequest):
+    """
+    Re-trigger graph extraction for a document that has already been chunked/embedded.
+    Fetches chunks from Qdrant and queues an extract_graph task.
+    """
+    from config import settings
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from stores.qdrant_store import get_qdrant_client
+    from workers.tasks import extract_graph
+
+    client = get_qdrant_client()
+    scroll_filter = Filter(
+        must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+    )
+
+    all_chunks = []
+    offset = None
+    while True:
+        results, next_offset = client.scroll(
+            collection_name=settings.qdrant_collection,
+            scroll_filter=scroll_filter,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in results:
+            p = point.payload or {}
+            all_chunks.append({
+                "text": p.get("text", ""),
+                "doc_id": p.get("doc_id", doc_id),
+                "filename": p.get("filename", ""),
+                "page_number": p.get("page_number", 1),
+                "chunk_index": p.get("chunk_index", 0),
+            })
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    if not all_chunks:
+        return api_error(
+            message=f"No chunks found for doc_id '{doc_id}' — upload and process the document first",
+            status_code=404,
+        )
+
+    extract_graph.delay(
+        doc_id=doc_id,
+        chunks=all_chunks,
+        entity_types=req.entity_types,
+        relation_types=req.relation_types,
+    )
+
+    return api_success(
+        data={
+            "doc_id": doc_id,
+            "chunks_queued": len(all_chunks),
+            "entity_types": req.entity_types or DEFAULT_ENTITY_TYPES,
+            "relation_types": req.relation_types or DEFAULT_RELATION_TYPES,
+        },
+        message=f"Graph extraction queued for {len(all_chunks)} chunks",
+        status_code=202,
     )

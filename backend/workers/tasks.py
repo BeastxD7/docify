@@ -19,7 +19,15 @@ EMBED_BATCH_SIZE = 50
 
 
 @celery_app.task(bind=True, max_retries=3)
-def process_document(self, job_id: str, doc_id: str, file_path: str, filename: str):
+def process_document(
+    self,
+    job_id: str,
+    doc_id: str,
+    file_path: str,
+    filename: str,
+    entity_types: list[str] | None = None,
+    relation_types: list[str] | None = None,
+):
     db = SessionLocal()
     try:
         # ── Mark processing ────────────────────────────────────────────────────
@@ -78,7 +86,12 @@ def process_document(self, job_id: str, doc_id: str, file_path: str, filename: s
         logger.info(f"[{job_id}] Done — {len(chunks)} chunks stored")
 
         # ── 5. Kick off graph extraction ───────────────────────────────────────
-        extract_graph.delay(doc_id=doc_id, chunks=chunks)
+        extract_graph.delay(
+            doc_id=doc_id,
+            chunks=chunks,
+            entity_types=entity_types,
+            relation_types=relation_types,
+        )
 
     except Exception as exc:
         logger.error(f"[{job_id}] Error: {exc}")

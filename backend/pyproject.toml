@@ -29,6 +29,7 @@ dependencies = [
 
     # Graph DB
     "neo4j>=5.0.0",
+    "networkx>=3.3",
 
     # LLM
     "anthropic>=0.40.0",

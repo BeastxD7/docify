@@ -1,7 +1,8 @@
+import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
 from api.response import api_error, api_success
@@ -19,6 +20,8 @@ MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    entity_types: str | None = Form(default=None, description='JSON array e.g. ["PERSON","LOCATION"]'),
+    relation_types: str | None = Form(default=None, description='JSON array e.g. ["WORKS_FOR","LOCATED_IN"]'),
 ):
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -44,6 +47,19 @@ async def upload_document(
     file_path = dest_dir / file.filename
     file_path.write_bytes(content)
 
+    parsed_entity_types = None
+    parsed_relation_types = None
+    if entity_types:
+        try:
+            parsed_entity_types = json.loads(entity_types)
+        except (json.JSONDecodeError, ValueError):
+            api_error("entity_types must be a valid JSON array of strings", status_code=400)
+    if relation_types:
+        try:
+            parsed_relation_types = json.loads(relation_types)
+        except (json.JSONDecodeError, ValueError):
+            api_error("relation_types must be a valid JSON array of strings", status_code=400)
+
     db.add(Document(id=doc_id, filename=file.filename, file_path=str(file_path)))
     db.add(Job(id=job_id, doc_id=doc_id, filename=file.filename, status=JobStatus.pending))
     db.commit()
@@ -53,6 +69,8 @@ async def upload_document(
         doc_id=doc_id,
         file_path=str(file_path),
         filename=file.filename,
+        entity_types=parsed_entity_types,
+        relation_types=parsed_relation_types,
     )
 
     return api_success(
