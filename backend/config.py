@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     groq_api_key: str = ""
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Q&A synthesis
     llm_provider: str = "anthropic"       # anthropic | ollama

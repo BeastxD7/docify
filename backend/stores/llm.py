@@ -39,6 +39,16 @@ def get_llm(task: str = "qa"):
             api_key=settings.groq_api_key,
         )
 
+    if provider == "openrouter":
+        from llama_index.llms.openai_like import OpenAILike
+
+        return OpenAILike(
+            model=model,
+            api_key=settings.openrouter_api_key,
+            api_base=settings.openrouter_base_url,
+            is_chat_model=True,
+        )
+
     from llama_index.llms.anthropic import Anthropic
 
     return Anthropic(
