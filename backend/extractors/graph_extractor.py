@@ -63,7 +63,7 @@ def extract_from_chunks(
     Run LLM entity/relation extraction over all chunks and store results in Neo4j.
     Returns (entities, relations) for logging/status purposes.
     """
-    llm = get_llm()
+    llm = get_llm(task="extraction")
     driver = get_neo4j_driver()
 
     # Deduplicated entity map: name → entity dict

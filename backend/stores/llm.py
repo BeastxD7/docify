@@ -1,25 +1,39 @@
 from config import settings
 
 
-def get_llm():
+def get_llm(task: str = "qa"):
     """
-    Returns a LlamaIndex LLM based on LLM_PROVIDER env var.
+    Returns a LlamaIndex LLM for the given task.
 
-    anthropic → Claude (claude-sonnet-4-6 by default, needs ANTHROPIC_API_KEY)
-    ollama    → local model via Ollama (llama3.1:8b or whatever LLM_MODEL is set to)
+    task:
+      "qa"         → Q&A synthesis       (LLM_PROVIDER / LLM_MODEL)
+      "extraction" → entity extraction   (EXTRACTION_LLM_PROVIDER / EXTRACTION_LLM_MODEL)
+      "summary"    → community summaries (SUMMARY_LLM_PROVIDER / SUMMARY_LLM_MODEL)
+
+    Per-task provider: anthropic | ollama
     """
-    if settings.llm_provider == "ollama":
+    if task == "extraction":
+        provider = settings.extraction_llm_provider
+        model = settings.extraction_llm_model
+    elif task == "summary":
+        provider = settings.summary_llm_provider
+        model = settings.summary_llm_model
+    else:
+        provider = settings.llm_provider
+        model = settings.llm_model
+
+    if provider == "ollama":
         from llama_index.llms.ollama import Ollama
 
         return Ollama(
-            model=settings.llm_model,
+            model=model,
             base_url=settings.ollama_base_url,
-            request_timeout=120.0,  # local models can be slow on first token
+            request_timeout=120.0,
         )
 
     from llama_index.llms.anthropic import Anthropic
 
     return Anthropic(
-        model=settings.llm_model,
+        model=model,
         api_key=settings.anthropic_api_key,
     )

@@ -11,8 +11,18 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+
+    # Q&A synthesis
     llm_provider: str = "anthropic"       # anthropic | ollama
-    llm_model: str = "claude-sonnet-4-6"  # or llama3.1:8b for ollama
+    llm_model: str = "claude-haiku-4-5-20251001"
+
+    # Graph entity/relation extraction (needs high instruction-following)
+    extraction_llm_provider: str = "anthropic"
+    extraction_llm_model: str = "claude-sonnet-4-6"
+
+    # Community summarization (bulk, cost-sensitive)
+    summary_llm_provider: str = "anthropic"
+    summary_llm_model: str = "claude-haiku-4-5-20251001"
 
     # Embeddings
     embedding_provider: str = "openai"    # openai | ollama

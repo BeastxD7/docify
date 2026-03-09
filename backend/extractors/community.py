@@ -58,7 +58,7 @@ def detect_and_store_communities(doc_id: str) -> list[dict]:
     G = _build_graph(entity_records, relation_records)
     partition = nx.community.louvain_communities(G, seed=42)
 
-    llm = get_llm()
+    llm = get_llm(task="summary")
     communities = []
 
     with driver.session() as session:
