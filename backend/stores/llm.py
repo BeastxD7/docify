@@ -10,7 +10,7 @@ def get_llm(task: str = "qa"):
       "extraction" → entity extraction   (EXTRACTION_LLM_PROVIDER / EXTRACTION_LLM_MODEL)
       "summary"    → community summaries (SUMMARY_LLM_PROVIDER / SUMMARY_LLM_MODEL)
 
-    Per-task provider: anthropic | ollama
+    Per-task provider: anthropic | groq | openrouter | azure-openai | ollama
     """
     if task == "extraction":
         provider = settings.extraction_llm_provider
@@ -47,6 +47,17 @@ def get_llm(task: str = "qa"):
             api_key=settings.openrouter_api_key,
             api_base=settings.openrouter_base_url,
             is_chat_model=True,
+        )
+
+    if provider == "azure-openai":
+        from llama_index.llms.azure_openai import AzureOpenAI
+
+        return AzureOpenAI(
+            model=model,
+            deployment_name=model,   # Azure uses deployment name = model name
+            api_key=settings.azure_openai_api_key,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_version=settings.azure_openai_api_version,
         )
 
     from llama_index.llms.anthropic import Anthropic

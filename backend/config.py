@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
+    # Azure OpenAI
+    azure_openai_api_key: str = ""
+    azure_openai_endpoint: str = "https://lakshx-agent.openai.azure.com/"
+    azure_openai_api_version: str = "2024-02-01"
+
     # Q&A synthesis
     llm_provider: str = "anthropic"       # anthropic | ollama
     llm_model: str = "claude-haiku-4-5-20251001"
