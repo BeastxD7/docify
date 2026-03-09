@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    groq_api_key: str = ""
 
     # Q&A synthesis
     llm_provider: str = "anthropic"       # anthropic | ollama

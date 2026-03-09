@@ -31,6 +31,14 @@ def get_llm(task: str = "qa"):
             request_timeout=120.0,
         )
 
+    if provider == "groq":
+        from llama_index.llms.groq import Groq
+
+        return Groq(
+            model=model,
+            api_key=settings.groq_api_key,
+        )
+
     from llama_index.llms.anthropic import Anthropic
 
     return Anthropic(
